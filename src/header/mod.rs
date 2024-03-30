@@ -12,6 +12,7 @@ pub use self::version::WebSocketVersion;
 pub use hyper::header::*;
 
 mod accept;
+mod authorization;
 pub mod extensions;
 mod key;
 mod origin;
