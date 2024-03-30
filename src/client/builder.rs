@@ -2,7 +2,8 @@
 
 use crate::header::extensions::Extension;
 use crate::header::{
-	Origin, WebSocketExtensions, WebSocketKey, WebSocketProtocol, WebSocketVersion,
+	Authorization as HeaderAuthorization, Origin, WebSocketExtensions, WebSocketKey,
+	WebSocketProtocol, WebSocketVersion,
 };
 use hyper::header::{Authorization, Basic, Header, HeaderFormat, Headers};
 use hyper::version::HttpVersion;
@@ -10,8 +11,8 @@ use std::borrow::Cow;
 use std::convert::Into;
 pub use url::{ParseError, Url};
 
-const DEFAULT_MAX_DATAFRAME_SIZE : usize = 1024*1024*100;
-const DEFAULT_MAX_MESSAGE_SIZE : usize = 1024*1024*200;
+const DEFAULT_MAX_DATAFRAME_SIZE: usize = 1024 * 1024 * 100;
+const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 200;
 
 #[cfg(any(feature = "sync", feature = "async"))]
 mod common_imports {
@@ -190,6 +191,16 @@ impl<'u> ClientBuilder<'u> {
 		upsert_header!(self.headers; WebSocketProtocol; {
 			Some(protos) => protos.0.push(protocol.into()),
 			None => WebSocketProtocol(vec![protocol.into()])
+		});
+		self
+	}
+	/// Adds a user-defined protocols to the handshake.
+	/// For example, you can pass a JWT token to authenticate the client in the form of a Bearer token.
+	/// Authorization: Bearer <token>
+	pub fn add_authorization(mut self, token: String) -> Self {
+		upsert_header!(self.headers; HeaderAuthorization<String>; {
+			Some(_) => panic!("Authorization header already set"),
+			None => Authorization(token)
 		});
 		self
 	}
@@ -515,7 +526,14 @@ impl<'u> ClientBuilder<'u> {
 		// validate
 		self.validate(&response)?;
 
-		Ok(Client::unchecked_with_limits(reader, response.headers, true, false, self.max_dataframe_size, self.max_dataframe_size))
+		Ok(Client::unchecked_with_limits(
+			reader,
+			response.headers,
+			true,
+			false,
+			self.max_dataframe_size,
+			self.max_dataframe_size,
+		))
 	}
 
 	/// Connect to a websocket server asynchronously.
@@ -803,7 +821,11 @@ impl<'u> ClientBuilder<'u> {
 			})
 			// output the final client and metadata
 			.map(move |(message, stream)| {
-				let codec = MessageCodec::new_with_limits(Context::Client, max_dataframe_size, max_message_size);
+				let codec = MessageCodec::new_with_limits(
+					Context::Client,
+					max_dataframe_size,
+					max_message_size,
+				);
 				let client = update_framed_codec(stream, codec);
 				(client, message.headers)
 			});
@@ -890,7 +912,10 @@ impl<'u> ClientBuilder<'u> {
 		if status != StatusCode::SwitchingProtocols {
 			if status.is_redirection() {
 				match response.headers.get::<hyper::header::Location>() {
-					Some(x) => return Err(WebSocketOtherError::RedirectError(status, x.to_string())).map_err(towse),
+					Some(x) => {
+						return Err(WebSocketOtherError::RedirectError(status, x.to_string()))
+							.map_err(towse)
+					}
 					None => (),
 				}
 			}
